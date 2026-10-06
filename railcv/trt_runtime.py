@@ -15,8 +15,8 @@ _DTYPES = {
 
 
 class TRTEngine:
-    def __init__(self, engine_path: str, device=torch.device("cuda")):
-        self.device = device
+    def __init__(self, engine_path: str, device=None):
+        self.device = device or torch.device("cuda")
         logger = trt.Logger(trt.Logger.WARNING)
         with open(engine_path, "rb") as f:
             self.engine = trt.Runtime(logger).deserialize_cuda_engine(f.read())
@@ -30,10 +30,10 @@ class TRTEngine:
         self.out_buf = torch.empty(
             tuple(self.engine.get_tensor_shape(self.outputs[0])),
             dtype=_DTYPES[self.engine.get_tensor_dtype(self.outputs[0])],
-            device=device,
+            device=self.device,
         )
         self.in_dtype = _DTYPES[self.engine.get_tensor_dtype(self.inputs[0])]
-        self.stream = torch.cuda.Stream(device=device)
+        self.stream = torch.cuda.Stream(device=self.device)
 
     def __call__(self, x: torch.Tensor) -> torch.Tensor:
         x = x.to(self.device, self.in_dtype).contiguous()
