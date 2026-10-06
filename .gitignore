@@ -1,0 +1,16 @@
+.venv/
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+weights/*
+!weights/.gitkeep
+data/videos/*
+!data/videos/.gitkeep
+data/calib/*
+!data/calib/.gitkeep
+data/rs19_egopath.json
+output/*
+!output/.gitkeep
+*.onnx
+*.engine
+*.trt

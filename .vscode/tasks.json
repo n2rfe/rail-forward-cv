@@ -1,0 +1,63 @@
+{
+  "version": "2.0.0",
+  "inputs": [
+    {
+      "id": "model",
+      "type": "pickString",
+      "description": "TEP-Net weights",
+      "options": ["chromatic-laughter-5", "logical-tree-1", "twinkling-rocket-21", "brilliant-horse-15"],
+      "default": "chromatic-laughter-5"
+    }
+  ],
+  "tasks": [
+    {
+      "label": "Setup: venv + deps + weights",
+      "type": "shell",
+      "command": "bash scripts/setup.sh",
+      "problemMatcher": []
+    },
+    {
+      "label": "Setup: venv + deps + weights (Jetson Thor)",
+      "type": "shell",
+      "command": "bash scripts/setup.sh --jetson",
+      "problemMatcher": []
+    },
+    {
+      "label": "Download TEP-Net weights",
+      "type": "shell",
+      "command": "${command:python.interpreterPath} scripts/download_weights.py",
+      "problemMatcher": []
+    },
+    {
+      "label": "Run tests",
+      "type": "shell",
+      "command": "${command:python.interpreterPath} -m pytest -q tests",
+      "group": { "kind": "test", "isDefault": true },
+      "problemMatcher": []
+    },
+    {
+      "label": "Export ONNX + build TensorRT FP16 engine",
+      "type": "shell",
+      "command": "${command:python.interpreterPath} scripts/export_onnx.py ${input:model} --build",
+      "problemMatcher": []
+    },
+    {
+      "label": "Calibrate: capture checkerboard images",
+      "type": "shell",
+      "command": "${command:python.interpreterPath} scripts/calibrate_intrinsics.py --capture 0",
+      "problemMatcher": []
+    },
+    {
+      "label": "Calibrate: solve intrinsics -> configs/camera.yaml",
+      "type": "shell",
+      "command": "${command:python.interpreterPath} scripts/calibrate_intrinsics.py --images 'data/calib/*.jpg' --cols 9 --rows 6 --square 0.025",
+      "problemMatcher": []
+    },
+    {
+      "label": "List cameras (v4l2)",
+      "type": "shell",
+      "command": "v4l2-ctl --list-devices && v4l2-ctl -d /dev/video0 --list-formats-ext",
+      "problemMatcher": []
+    }
+  ]
+}

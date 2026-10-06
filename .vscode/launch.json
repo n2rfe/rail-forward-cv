@@ -1,0 +1,74 @@
+{
+  "version": "0.2.0",
+  "inputs": [
+    {
+      "id": "model",
+      "type": "pickString",
+      "description": "TEP-Net weights",
+      "options": ["chromatic-laughter-5", "logical-tree-1", "twinkling-rocket-21", "brilliant-horse-15"],
+      "default": "chromatic-laughter-5"
+    },
+    { "id": "video", "type": "promptString", "description": "Video or image path", "default": "data/videos/ride.mp4" },
+    { "id": "cam", "type": "promptString", "description": "Camera index or GStreamer pipeline", "default": "0" }
+  ],
+  "configurations": [
+    {
+      "name": "Forward: live camera",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/scripts/run_forward.py",
+      "args": ["--source", "${input:cam}", "--model", "${input:model}", "--show-crop"],
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "justMyCode": true
+    },
+    {
+      "name": "Forward: live camera (TensorRT, Thor)",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/scripts/run_forward.py",
+      "args": ["--source", "${input:cam}", "--model", "${input:model}", "--runtime", "tensorrt",
+               "--log", "output/live_log.csv"],
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal"
+    },
+    {
+      "name": "Forward: video/image file",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/scripts/run_forward.py",
+      "args": ["--source", "${input:video}", "--model", "${input:model}", "--show-crop",
+               "--save", "output/annotated.mp4", "--log", "output/log.csv"],
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal"
+    },
+    {
+      "name": "Forward: sample image (sanity check)",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/scripts/run_forward.py",
+      "args": ["--source", "third_party/tep/data/egopath.jpg", "--model", "${input:model}", "--show-crop",
+               "--save", "output/sample_out.jpg"],
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal"
+    },
+    {
+      "name": "Benchmark model",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/scripts/benchmark.py",
+      "args": ["--model", "${input:model}"],
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal"
+    },
+    {
+      "name": "Debug current file",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${file}",
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "env": { "PYTHONPATH": "${workspaceFolder}:${workspaceFolder}/third_party/tep" }
+    }
+  ]
+}

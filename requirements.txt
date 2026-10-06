@@ -1,0 +1,8 @@
+# torch / torchvision are installed by scripts/setup.sh (platform-specific; see README)
+numpy
+Pillow
+PyYAML
+opencv-python   # skipped on Jetson when the system OpenCV (with GStreamer) is already importable
+onnx
+pytest
+ruff

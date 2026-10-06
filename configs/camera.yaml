@@ -1,0 +1,33 @@
+# Forward camera + track + vehicle parameters for ranging and the brake check.
+# Replace the intrinsics with the output of `scripts/calibrate_intrinsics.py`.
+
+camera:
+  name: ELP 2MP USB, 5-50 mm varifocal   # confirm part number / sensor
+  width: 1920
+  height: 1080
+  fps: 30
+
+# PLACEHOLDER intrinsics: 5 mm focal length, 2.8 um pixels (fx = 5 / 0.0028 = 1786 px).
+# Ranging is only as good as fx. Re-run calibration every time the zoom or focus ring moves.
+intrinsics:
+  fx: 1786.0
+  fy: 1786.0
+  cx: 960.0
+  cy: 540.0
+  dist: [0.0, 0.0, 0.0, 0.0, 0.0]   # k1, k2, p1, p2, k3
+
+mount:
+  height_m: null       # tape-measure lens height above the rail head; compared with the fitted estimate
+  # Fixed crop for TEP-Net (x_left, y_top, x_right, y_bottom), inclusive pixels.
+  # null = use auto-crop. Tune once per mount with `scripts/run_forward.py --show-crop`.
+  crop: null
+
+track:
+  # TEP-Net / RailSem19 rails are centerlines, so use center-to-center spacing:
+  # standard gauge 1435 mm (inner faces) + ~70 mm rail head width.
+  gauge_center_to_center_m: 1.505
+
+vehicle:
+  max_speed_mph: 20
+  decel_mps2: 2.0        # PLACEHOLDER: get the achievable value from the brake team
+  latency_s: 0.5         # camera + inference + actuation; measure end to end

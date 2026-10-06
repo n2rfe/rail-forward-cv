@@ -1,0 +1,7 @@
+{
+  "folders": [
+    { "name": "rail-forward-cv", "path": "." },
+    { "name": "TEP-Net (vendored)", "path": "third_party/tep" }
+  ],
+  "settings": {}
+}
