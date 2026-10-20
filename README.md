@@ -116,3 +116,9 @@ Reading the results:
 - lat_err_m: how far the predicted rails are from the true rails, in metres at that distance.
 - height_gt_m should be about 3.5. If it is consistently off, the gauge assumption is off; implied_gauge_m gives the value to put in configs/syndra.yaml.
 - height_pred_m vs 3.5 and range_err@Z show how much model error turns into distance error.
+
+
+## Troubleshooting
+
+- `ImportError: libGL.so.1` when importing cv2: the machine has no display libraries (Codespaces, servers). Either `sudo apt-get install -y libgl1`, or `pip uninstall -y opencv-python && pip install opencv-python-headless` and run scripts with `--no-show`. setup.sh does the second automatically.
+- No GPU (e.g. Codespaces): everything runs on CPU, just slower. logical-tree-1 (ResNet-18) is the quickest model; keep video runs to a short `--start/--end` window.

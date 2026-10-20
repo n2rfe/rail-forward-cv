@@ -35,6 +35,13 @@ else
   pip install -r requirements.txt
 fi
 
+# Headless machines (Codespaces, servers, Docker) lack libGL, which the desktop OpenCV wheel needs
+if ! python -c "import cv2" 2>/dev/null; then
+  echo "OpenCV can't load (no libGL?): switching to opencv-python-headless (no cv2.imshow; use --no-show)"
+  pip uninstall -y opencv-python >/dev/null 2>&1 || true
+  pip install opencv-python-headless
+fi
+
 python scripts/download_weights.py || echo "WARN: weight download failed. Download https://tasv.railenium.eu/egopath.zip manually, then: python scripts/download_weights.py --zip <path>"
 python -m pytest -q tests
 echo "Setup complete. Activate with: source .venv/bin/activate"
