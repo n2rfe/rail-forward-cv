@@ -27,7 +27,7 @@ from railcv.ranging import MPH, CameraModel, estimate_range, stopping_distance
 
 def parse():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("--source", default="0", help="camera index, video/image path, or GStreamer pipeline")
+    p.add_argument("--source", default="0", help="camera index, video/image path, image folder, or GStreamer pipeline")
     p.add_argument("--model", default="chromatic-laughter-5", help=f"one of: {', '.join(MODELS)}")
     p.add_argument("--config", default="configs/camera.yaml")
     p.add_argument("--crop", default=None, help="'auto', 'none', or x0,y0,x1,y1 (overrides config)")
@@ -65,7 +65,7 @@ def main():
     is_image = os.path.splitext(a.source)[1].lower() in IMAGE_EXT
     c = cfg["camera"]
     src = frames(a.source, width=c["width"], height=c["height"], fps=c["fps"])
-    if a.start and not is_image and not a.source.isdigit():
+    if a.start and not is_image and not a.source.isdigit() and not os.path.isdir(a.source):
         cap = cv2.VideoCapture(a.source)
         fps_file = cap.get(cv2.CAP_PROP_FPS) or 30
         cap.release()

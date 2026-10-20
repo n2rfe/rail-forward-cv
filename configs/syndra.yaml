@@ -1,0 +1,41 @@
+# SynDRA (Synthetic Dataset for Railway Applications, WACV 2025) evaluation settings.
+# Dataset: https://syndra.retis.santannapisa.it/syndra.html  (CC BY-NC 4.0, research use, cite the paper)
+
+# Camera from the SynDRA sensor specs: 1920x1080, 90 deg horizontal FOV, 3.5 m above the rails,
+# level with the ground, stereo pair 0.6 m apart (each camera 0.3 m off the track centerline).
+# fx = (width / 2) / tan(HFOV / 2) = 960 / tan(45 deg) = 960 px. No lens distortion (rendered).
+camera:
+  width: 1920
+  height: 1080
+  hfov_deg: 90.0
+  height_m: 3.5
+  index: 0              # 0 = left camera, 1 = right camera
+
+track:
+  # Rail center-to-center spacing assumed for ranging. syndra_eval.py prints the gauge implied by the
+  # ground-truth rails ("implied_gauge_m"); if it differs consistently, put that value here.
+  gauge_center_to_center_m: 1.505
+
+# Semantic label values in the SS PNGs (after running SynDRA's Utils/SS_bin_to_png.py).
+# The values are NOT published on the website: fill them in with
+#     python scripts/syndra_labels.py --seq <sequence folder>
+# Each entry is either an [R, G, B] color or a single integer (for single-channel label PNGs).
+# Class names follow the SynDRA paper; "main" = the ego track, "other" = neighboring tracks.
+labels:
+  railraised-main: null
+  ballast-int-main: null
+  sleeper-int-main: null
+  ballast-ext-main: null
+  sleeper-ext-main: null
+  railraised-other: null
+
+# Ground-truth ego path = the region between the ego rails, rails included
+# (the SynDRA paper's "Railway" group for the main track).
+ego_region: [railraised-main, ballast-int-main, sleeper-int-main]
+# Ground-truth rail centerlines are extracted from this class.
+ego_rails: railraised-main
+
+eval:
+  stride: 5             # SynDRA is 10 FPS; evaluate every 5th frame (2 Hz) by default
+  min_rail_sep_px: 6    # ignore GT rows where the two rails are closer than this
+  range_checkpoints_m: [10, 20, 30, 50, 75]
