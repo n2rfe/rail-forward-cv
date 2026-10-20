@@ -87,6 +87,33 @@
       "console": "integratedTerminal"
     },
     {
+      "name": "Demo: cab-ride video (ego path only)",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/scripts/run_forward.py",
+      "args": [
+        "--source",
+        "${input:video}",
+        "--model",
+        "${input:model}",
+        "--no-range",
+        "--show-crop",
+        "--save",
+        "output/demo_egopath.mp4"
+      ],
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal"
+    },
+    {
+      "name": "Verify pretrained weights",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/scripts/verify_weights.py",
+      "args": [],
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal"
+    },
+    {
       "name": "Forward: sample image (sanity check)",
       "type": "debugpy",
       "request": "launch",

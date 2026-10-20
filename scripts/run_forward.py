@@ -39,6 +39,9 @@ def parse():
     p.add_argument("--no-show", action="store_true", help="headless (no window)")
     p.add_argument("--show-crop", action="store_true")
     p.add_argument("--start", type=float, default=0, help="video start time (s)")
+    p.add_argument("--end", type=float, default=None, help="video end time (s)")
+    p.add_argument("--no-range", action="store_true",
+                   help="draw the ego path only (for footage from an uncalibrated camera, e.g. downloaded cab rides)")
     return p.parse_args()
 
 
@@ -65,12 +68,16 @@ def main():
     is_image = os.path.splitext(a.source)[1].lower() in IMAGE_EXT
     c = cfg["camera"]
     src = frames(a.source, width=c["width"], height=c["height"], fps=c["fps"])
-    if a.start and not is_image and not a.source.isdigit() and not os.path.isdir(a.source):
+    out_fps = c["fps"]
+    max_frames = None
+    if os.path.isfile(a.source) and not is_image:  # video file: honor its own frame rate
         cap = cv2.VideoCapture(a.source)
-        fps_file = cap.get(cv2.CAP_PROP_FPS) or 30
+        out_fps = cap.get(cv2.CAP_PROP_FPS) or c["fps"]
         cap.release()
-        for _ in range(int(a.start * fps_file)):
+        for _ in range(int(a.start * out_fps)):
             next(src, None)
+        if a.end is not None:
+            max_frames = max(0, int((a.end - a.start) * out_fps))
 
     writer, logw, logf = None, None, None
     if a.log:
@@ -81,12 +88,14 @@ def main():
 
     t_prev, i, paused = time.perf_counter(), 0, False
     for frame, t_cap in src:
+        if max_frames is not None and i >= max_frames:
+            break
         rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         if is_image and crop == "auto":
             for _ in range(49):  # let the auto-crop converge on a single still (as upstream detect.py does)
                 model(rgb)
         path = model(rgb)
-        rng = estimate_range(path.left, path.right, cam, crop=path.crop) if path.has_rails else None
+        rng = estimate_range(path.left, path.right, cam, crop=path.crop) if path.has_rails and not a.no_range else None
 
         now = time.perf_counter()
         loop_ms, t_prev = (now - t_prev) * 1e3, now
@@ -97,12 +106,17 @@ def main():
             vis = draw_crop(vis, path.crop)
 
         clear = rng.clear_m if rng else None
-        warn = clear is None or clear < stop_m
-        hud = [
-            f"Clear path: {clear:.1f} m (+/-{rng.clear_err_m:.1f}/px)" if clear else "Clear path: --",
-            f"Stop dist @ {veh['max_speed_mph']} mph: {stop_m:.1f} m",
-            f"Infer {path.infer_ms:.1f} ms | loop {loop_ms:.0f} ms ({1e3 / max(loop_ms, 1e-3):.0f} FPS)",
-        ]
+        perf = f"Infer {path.infer_ms:.1f} ms | loop {loop_ms:.0f} ms ({1e3 / max(loop_ms, 1e-3):.0f} FPS)"
+        if a.no_range:
+            warn = not path.has_rails
+            hud = [f"Ego path: {'detected' if path.has_rails else 'not found'}  ({a.model})", perf]
+        else:
+            warn = clear is None or clear < stop_m
+            hud = [
+                f"Clear path: {clear:.1f} m (+/-{rng.clear_err_m:.1f}/px)" if clear else "Clear path: --",
+                f"Stop dist @ {veh['max_speed_mph']} mph: {stop_m:.1f} m",
+                perf,
+            ]
         if rng is not None and rng.cam_height_m:
             ref = f" (tape {cam.mount_height_m} m)" if cam.mount_height_m else ""
             hud.append(f"Fitted cam height {rng.cam_height_m:.2f} m{ref}")
@@ -123,7 +137,7 @@ def main():
             else:
                 if writer is None:
                     h, w = vis.shape[:2]
-                    writer = cv2.VideoWriter(a.save, cv2.VideoWriter_fourcc(*"mp4v"), c["fps"], (w, h))
+                    writer = cv2.VideoWriter(a.save, cv2.VideoWriter_fourcc(*"mp4v"), out_fps, (w, h))
                 writer.write(vis)
 
         if not a.no_show:
