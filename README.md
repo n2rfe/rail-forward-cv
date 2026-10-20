@@ -27,7 +27,7 @@ scripts/download_weights.py
 Downloads the TEP-Net pretrained models (egopath.zip from railenium.eu) into weights/, plus the RailSem19 ego-path annotations into data/. If the download is blocked, download the zip in a browser and pass it with --zip.                                                                                                                       
 
 scripts/run_forward.py
-The main program. Runs ego-path detection and ranging on a USB camera, video file, image, or GStreamer pipeline. Draws the path, distance ticks and a HUD that turns red when the clear path is shorter than the stopping distance. Can save annotated output (--save) and a per-frame CSV of range and latency (--log). Use --runtime tensorrt for the TensorRT engine, and --show-crop to see the crop region fed to the model.
+The main program. Runs ego-path detection and ranging on a USB camera, video file, image, or GStreamer pipeline. Draws the path, distance ticks and a HUD that turns red when the clear path is shorter than the stopping distance. Can save annotated output (--save) and a per-frame CSV of range and latency (--log). Use --runtime tensorrt for the TensorRT engine, and --show-crop to see the crop region fed to the model. For footage from a camera we haven't calibrated (e.g. a downloaded cab ride), add --no-range to draw only the ego path; --start/--end pick a time window in seconds.
 
 scripts/viewer.py
 Tkinter GUI for live viewing. Shows the camera feed with buttons to pause, toggle inference on/off, switch models, take snapshots and record video to output/. Works as a plain camera viewer at minimum.
@@ -37,6 +37,9 @@ Checkerboard camera calibration. First run with --capture to grab 20-40 checkerb
 
 scripts/export_onnx.py
 Exports a model to ONNX, and with --build also builds a TensorRT FP16 engine using trtexec. Build the engine on the machine that will run it; Thor and L4 engines are not interchangeable.
+
+scripts/verify_weights.py
+Checks the downloaded TEP-Net weights: files present, strict loading into the configured architecture, parameter count against the paper, and a sanity run on TEP-Net's sample frame. Writes overlays to output/verify/ and prints PASS/FAIL per model.
 
 scripts/benchmark.py
 Measures model-only inference latency (mean, p50, p99, FPS) for a given model and runtime. Does not include camera capture, preprocessing or drawing.
