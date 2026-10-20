@@ -5,8 +5,19 @@
       "id": "model",
       "type": "pickString",
       "description": "TEP-Net weights",
-      "options": ["chromatic-laughter-5", "logical-tree-1", "twinkling-rocket-21", "brilliant-horse-15"],
+      "options": [
+        "chromatic-laughter-5",
+        "logical-tree-1",
+        "twinkling-rocket-21",
+        "brilliant-horse-15"
+      ],
       "default": "chromatic-laughter-5"
+    },
+    {
+      "id": "syndra",
+      "type": "promptString",
+      "description": "SynDRA sequence folder",
+      "default": "data/syndra"
     }
   ],
   "tasks": [
@@ -32,7 +43,10 @@
       "label": "Run tests",
       "type": "shell",
       "command": "${command:python.interpreterPath} -m pytest -q tests",
-      "group": { "kind": "test", "isDefault": true },
+      "group": {
+        "kind": "test",
+        "isDefault": true
+      },
       "problemMatcher": []
     },
     {
@@ -57,6 +71,12 @@
       "label": "List cameras (v4l2)",
       "type": "shell",
       "command": "v4l2-ctl --list-devices && v4l2-ctl -d /dev/video0 --list-formats-ext",
+      "problemMatcher": []
+    },
+    {
+      "label": "SynDRA: inspect label colors",
+      "type": "shell",
+      "command": "${command:python.interpreterPath} scripts/syndra_labels.py --seq ${input:syndra}",
       "problemMatcher": []
     }
   ]

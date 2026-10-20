@@ -5,11 +5,32 @@
       "id": "model",
       "type": "pickString",
       "description": "TEP-Net weights",
-      "options": ["chromatic-laughter-5", "logical-tree-1", "twinkling-rocket-21", "brilliant-horse-15"],
+      "options": [
+        "chromatic-laughter-5",
+        "logical-tree-1",
+        "twinkling-rocket-21",
+        "brilliant-horse-15"
+      ],
       "default": "chromatic-laughter-5"
     },
-    { "id": "video", "type": "promptString", "description": "Video or image path", "default": "data/videos/ride.mp4" },
-    { "id": "cam", "type": "promptString", "description": "Camera index or GStreamer pipeline", "default": "0" }
+    {
+      "id": "video",
+      "type": "promptString",
+      "description": "Video or image path",
+      "default": "data/videos/ride.mp4"
+    },
+    {
+      "id": "cam",
+      "type": "promptString",
+      "description": "Camera index or GStreamer pipeline",
+      "default": "0"
+    },
+    {
+      "id": "syndra",
+      "type": "promptString",
+      "description": "SynDRA root, scenario or sequence folder",
+      "default": "data/syndra"
+    }
   ],
   "configurations": [
     {
@@ -17,7 +38,13 @@
       "type": "debugpy",
       "request": "launch",
       "program": "${workspaceFolder}/scripts/run_forward.py",
-      "args": ["--source", "${input:cam}", "--model", "${input:model}", "--show-crop"],
+      "args": [
+        "--source",
+        "${input:cam}",
+        "--model",
+        "${input:model}",
+        "--show-crop"
+      ],
       "cwd": "${workspaceFolder}",
       "console": "integratedTerminal",
       "justMyCode": true
@@ -27,8 +54,16 @@
       "type": "debugpy",
       "request": "launch",
       "program": "${workspaceFolder}/scripts/run_forward.py",
-      "args": ["--source", "${input:cam}", "--model", "${input:model}", "--runtime", "tensorrt",
-               "--log", "output/live_log.csv"],
+      "args": [
+        "--source",
+        "${input:cam}",
+        "--model",
+        "${input:model}",
+        "--runtime",
+        "tensorrt",
+        "--log",
+        "output/live_log.csv"
+      ],
       "cwd": "${workspaceFolder}",
       "console": "integratedTerminal"
     },
@@ -37,8 +72,17 @@
       "type": "debugpy",
       "request": "launch",
       "program": "${workspaceFolder}/scripts/run_forward.py",
-      "args": ["--source", "${input:video}", "--model", "${input:model}", "--show-crop",
-               "--save", "output/annotated.mp4", "--log", "output/log.csv"],
+      "args": [
+        "--source",
+        "${input:video}",
+        "--model",
+        "${input:model}",
+        "--show-crop",
+        "--save",
+        "output/annotated.mp4",
+        "--log",
+        "output/log.csv"
+      ],
       "cwd": "${workspaceFolder}",
       "console": "integratedTerminal"
     },
@@ -47,8 +91,31 @@
       "type": "debugpy",
       "request": "launch",
       "program": "${workspaceFolder}/scripts/run_forward.py",
-      "args": ["--source", "third_party/tep/data/egopath.jpg", "--model", "${input:model}", "--show-crop",
-               "--save", "output/sample_out.jpg"],
+      "args": [
+        "--source",
+        "third_party/tep/data/egopath.jpg",
+        "--model",
+        "${input:model}",
+        "--show-crop",
+        "--save",
+        "output/sample_out.jpg"
+      ],
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal"
+    },
+    {
+      "name": "SynDRA: evaluate ego path + ranging",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/scripts/syndra_eval.py",
+      "args": [
+        "--root",
+        "${input:syndra}",
+        "--model",
+        "${input:model}",
+        "--vis",
+        "10"
+      ],
       "cwd": "${workspaceFolder}",
       "console": "integratedTerminal"
     },
@@ -57,7 +124,10 @@
       "type": "debugpy",
       "request": "launch",
       "program": "${workspaceFolder}/scripts/benchmark.py",
-      "args": ["--model", "${input:model}"],
+      "args": [
+        "--model",
+        "${input:model}"
+      ],
       "cwd": "${workspaceFolder}",
       "console": "integratedTerminal"
     },
@@ -68,7 +138,9 @@
       "program": "${file}",
       "cwd": "${workspaceFolder}",
       "console": "integratedTerminal",
-      "env": { "PYTHONPATH": "${workspaceFolder}:${workspaceFolder}/third_party/tep" }
+      "env": {
+        "PYTHONPATH": "${workspaceFolder}:${workspaceFolder}/third_party/tep"
+      }
     }
   ]
 }

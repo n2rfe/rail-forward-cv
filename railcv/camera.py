@@ -1,4 +1,4 @@
-"""Frame sources: USB/UVC camera index, video file, image, or a GStreamer pipeline string."""
+"""Frame sources: USB/UVC camera index, video file, image, image folder, or a GStreamer pipeline string."""
 
 import os
 import time
@@ -13,7 +13,7 @@ def open_source(src, width=1920, height=1080, fps=30):
 
     src: "0" / 0 -> /dev/video0, path to a video, or a GStreamer pipeline (contains '!').
     """
-    if isinstance(src, str) and os.path.splitext(src)[1].lower() in IMAGE_EXT:
+    if isinstance(src, str) and (os.path.isdir(src) or os.path.splitext(src)[1].lower() in IMAGE_EXT):
         return None
     if isinstance(src, str) and "!" in src:
         cap = cv2.VideoCapture(src, cv2.CAP_GSTREAMER)
@@ -32,8 +32,24 @@ def open_source(src, width=1920, height=1080, fps=30):
     return cap
 
 
+def image_files(folder):
+    """Sorted image paths in a folder (e.g. a converted SynDRA RGBCamera_0 sequence)."""
+    return sorted(
+        os.path.join(folder, f) for f in os.listdir(folder) if os.path.splitext(f)[1].lower() in IMAGE_EXT
+    )
+
+
 def frames(src, **kw):
-    """Yields (bgr_frame, capture_timestamp_s). Works for images, videos and cameras."""
+    """Yields (bgr_frame, capture_timestamp_s). Works for images, image folders, videos and cameras."""
+    if isinstance(src, str) and os.path.isdir(src):
+        files = image_files(src)
+        if not files:
+            raise RuntimeError(f"No images in {src}")
+        for f in files:
+            img = cv2.imread(f)
+            if img is not None:
+                yield img, time.perf_counter()
+        return
     cap = open_source(src, **kw)
     if cap is None:
         img = cv2.imread(src)
