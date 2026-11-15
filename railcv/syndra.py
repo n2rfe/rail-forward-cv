@@ -230,46 +230,96 @@ def _runs(row):
     return (starts + ends - 1) / 2.0, ends - starts
 
 
-def gt_rails(rail_mask, min_sep_px=6.0, max_jump_px=None, step=1, center_x=None):
-    """Left/right ego-rail centerlines from the railraised-main mask, tracked bottom-up.
+def _match(row_mask, x_pred, tol, allow_contains=False):
+    """Center of the rail run nearest x_pred in one mask row, or None if none is within tol."""
+    centers, widths = _runs(row_mask)
+    if not len(centers):
+        return None
+    i = int(np.argmin(np.abs(centers - x_pred)))
+    if abs(centers[i] - x_pred) <= tol:
+        return float(centers[i])
+    if allow_contains and abs(centers[i] - x_pred) <= widths[i] / 2.0:
+        return float(x_pred)  # inside a merged run (two rails drawn together at a switch)
+    return None
 
-    Returns (left, right) as (N, 2) arrays of (x, y), bottom to top, rows where both rails are seen.
-    At switches the pair closest to the previous row's pair is kept. With center_x given, a bottom row
-    showing more than two rails starts on the pair around the camera axis (for label sets that don't
-    separate the ego track from other tracks).
+
+def _extrapolate(hist, y, n=24):
+    """Rail x at row y from a straight-line fit of its last n accepted points."""
+    if len(hist) < 6:
+        return hist[-1][1]
+    pts = np.asarray(hist[-n:], float)
+    k, c = np.polyfit(pts[:, 0], pts[:, 1], 1)
+    return float(k * y + c)
+
+
+def gt_rails(rail_mask, min_sep_px=6.0, step=1, center_x=None, alt_mask=None, max_gap=80):
+    """Left/right ego-rail centerlines from a rail label mask, traced from the bottom of the image up.
+
+    Each rail is followed by straight-line extrapolation of its recent points, so the trace bridges
+    rows where the label drops out (1 px rails far away) or where another track's rails are drawn over
+    the ego rails at a switch. alt_mask (e.g. rails of other tracks) is consulted only where rail_mask
+    has nothing at the expected position. With center_x, a bottom row showing more than two rails
+    starts on the pair around the camera axis.
+
+    Returns (left, right) as (N, 2) arrays of (x, y), bottom to top, for rows where both rails were found.
     """
     h = rail_mask.shape[0]
-    left, right = [], []
-    prev = None
+    hist_l, hist_r, left, right = [], [], [], []
+    gap = 0
     for y in range(h - 1, -1, -step):
-        centers, _ = _runs(rail_mask[y])
-        if len(centers) < 2:
-            if prev is not None and len(left) > 5:
-                break  # path ended (occlusion / horizon) after it had started
-            continue
-        if prev is None:
+        if not hist_l:  # find the starting pair
+            centers, _ = _runs(rail_mask[y])
             if len(centers) == 2:
                 l, r = centers
-            elif center_x is not None:
-                # several rails in view (no separate ego-rail class): take the adjacent pair around the camera axis
+            elif len(centers) > 2 and center_x is not None:
                 mids = (centers[:-1] + centers[1:]) / 2.0
                 i = int(np.argmin(np.abs(mids - center_x)))
                 l, r = centers[i], centers[i + 1]
             else:
-                continue  # start only on an unambiguous row
-        else:
-            pl, pr = prev
-            l = centers[np.argmin(np.abs(centers - pl))]
-            r = centers[np.argmin(np.abs(centers - pr))]
-            jump = max_jump_px or max(4.0, 0.25 * (pr - pl))
-            if l == r or abs(l - pl) > jump or abs(r - pr) > jump:
-                break
-        if r - l < min_sep_px:
+                continue
+            if r - l < min_sep_px:
+                continue
+            hist_l.append((y, float(l)))
+            hist_r.append((y, float(r)))
+            left.append((l, y))
+            right.append((r, y))
+            continue
+        pl, pr = _extrapolate(hist_l, y), _extrapolate(hist_r, y)
+        sep = pr - pl
+        if sep < min_sep_px:
             break
-        left.append((l, y))
-        right.append((r, y))
-        prev = (l, r)
+        tol = max(2.5, 0.15 * sep)
+        xl = _match(rail_mask[y], pl, tol)
+        xr = _match(rail_mask[y], pr, tol)
+        if alt_mask is not None:
+            if xl is None:
+                xl = _match(alt_mask[y], pl, tol, allow_contains=True)
+            if xr is None:
+                xr = _match(alt_mask[y], pr, tol, allow_contains=True)
+        if xl is not None:
+            hist_l.append((y, xl))
+        if xr is not None:
+            hist_r.append((y, xr))
+        if xl is not None and xr is not None and xr - xl >= min_sep_px:
+            left.append((xl, y))
+            right.append((xr, y))
+            gap = 0
+        else:
+            gap += 1
+            if gap > max_gap:
+                break
     return np.array(left, float).reshape(-1, 2), np.array(right, float).reshape(-1, 2)
+
+
+def rail_masks(labels, cfg):
+    """(ego rail mask, all-rails mask or None) from the config's ego_rails / other_rails label names."""
+    ego = class_mask(labels, cfg["labels"][cfg["ego_rails"]])
+    alt = None
+    for name in cfg.get("other_rails") or []:
+        v = cfg["labels"].get(name)
+        if v is not None:
+            alt = (ego.copy() if alt is None else alt) | class_mask(labels, v)
+    return ego, alt
 
 
 # --------------------------------------------------------------------------- metrics helpers

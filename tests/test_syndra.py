@@ -148,7 +148,6 @@ def test_eval_on_syndra_gen_output(tmp_path):
     F.make_gen_tree(str(tmp_path / "gen"))
     cfg = load_config(os.path.join(ROOT, "configs", "syndra.yaml"))
     cfg["labels"]["railraised-main"] = 7  # only the rail class is known; no "between the rails" classes
-    cfg["depth"]["units_per_m"] = 100.0
     cfg_path = tmp_path / "syndra.yaml"
     with open(cfg_path, "w") as f:
         yaml.safe_dump(cfg, f)
@@ -173,8 +172,7 @@ def test_eval_on_syndra_gen_output(tmp_path):
     with open(out / "summary.csv") as f:
         row = next(r for r in csv.DictReader(f) if r["sequence"] == "ALL")
     assert float(row["height_gt_m"]) == pytest.approx(3.5, rel=0.03)
-    assert float(row["depth_units_per_m"]) == pytest.approx(100.0, rel=0.03)  # depth scale recovered
-    assert float(row["gauge_vs_depth_pct"]) < 3.0  # gauge ranging agrees with rendered depth
+    assert "range_err_fit_pct" in row and "fit_err@20" in row  # depth columns exist (random model: may be empty)
 
 
 def test_image_folder_source(tree):
@@ -221,3 +219,39 @@ def test_eval_end_to_end_random_model(tree, tmp_path):
         row = next(r for r in csv.DictReader(f) if r["sequence"] == "ALL")
     assert float(row["height_gt_m"]) == pytest.approx(3.5, rel=0.03)
     assert float(row["implied_gauge_m"]) == pytest.approx(F.GAUGE, rel=0.03)
+
+
+def test_depth_metrics_with_true_rails(tmp_path):
+    """Feeding the true rails as the 'prediction' must give ~zero range error against the depth map."""
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("syndra_eval", os.path.join(ROOT, "scripts", "syndra_eval.py"))
+    ev = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(ev)
+    from railcv.egopath import EgoPath
+
+    seq = F.make_gen_tree(str(tmp_path))
+    s = find_sequences(str(tmp_path))[0]
+    rgb = read_rgb(frame_pairs(s)[0][1])
+    depth = read_depth(depth_files(s)[0], rgb.shape)
+    cfg = load_config(os.path.join(ROOT, "configs", "syndra.yaml"))
+    cam = camera_model(cfg, rgb.shape)
+    tl, tr, _ = F.true_rails(z_min=6, z_max=60)
+    path = EgoPath(left=tl, right=tr)
+    r = {}
+    ev.depth_metrics(r, depth, path, estimate_range(tl, tr, cam), cfg, cam)
+    assert abs(r["range_bias_pct"]) < 1.0 and r["range_err_fit_pct"] < 1.0
+    assert r["height_depth_m"] == pytest.approx(F.CAM_H, rel=0.02)
+    assert r["fit_err@20"] < 0.3 and seq
+
+
+def test_gt_rails_bridge_gaps_and_overdrawn_rails():
+    _, lab = F.render()
+    ego = class_mask(lab, list(F.COLORS["railraised-main"]))
+    full, _ = gt_rails(ego)
+    broken = ego.copy()
+    broken[600:660] = False  # the ego-rail label drops out for 60 rows
+    gl, _ = gt_rails(broken)
+    assert gl[:, 1].min() <= full[:, 1].min() + 2  # the trace continues past the gap
+    gl2, _ = gt_rails(broken, alt_mask=ego)  # another class holds the rails there
+    assert len(gl2) > len(gl)

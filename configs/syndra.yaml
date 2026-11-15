@@ -13,10 +13,10 @@ camera:
   height_m: 3.5
   index: 0              # 0 = mono or left camera, 1 = right camera
 
-# Depth camera (SynDRA-Gen, optional). Raw 16-bit units per metre. Leave null on the first run:
-# syndra_eval.py prints the value implied by the ground-truth rails (about 100 = centimetres).
+# Depth camera (SynDRA-Gen, optional). Raw 16-bit units per metre. SynDRA-Gen depth is planar depth in
+# centimetres (checked: the track bed straight ahead reads the Z offset set in the menu). null = ignore depth.
 depth:
-  units_per_m: null
+  units_per_m: 100
 
 track:
   # Rail center-to-center spacing assumed for ranging. syndra_eval.py prints the gauge implied by the
@@ -40,8 +40,11 @@ labels:
 # Ground-truth ego path = the region between the ego rails, rails included
 # (the SynDRA paper's "Railway" group for the main track).
 ego_region: [railraised-main, ballast-int-main, sleeper-int-main]
-# Ground-truth rail centerlines are extracted from this class.
+# Ground-truth rail centerlines are traced in this class.
 ego_rails: railraised-main
+# Other rail classes, consulted only where the ego-rail label drops out. In SynDRA-Gen another track's
+# rails are drawn over the ego rails at switches.
+other_rails: [railraised-other]
 
 eval:
   stride: 5             # SynDRA is 10 FPS; evaluate every 5th frame (2 Hz) by default

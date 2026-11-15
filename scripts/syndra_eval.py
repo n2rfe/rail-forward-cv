@@ -37,7 +37,6 @@ from railcv.ranging import estimate_range
 from railcv.syndra import (
     camera_model,
     depth_files,
-    class_mask,
     ego_region_mask,
     find_sequences,
     frame_pairs,
@@ -46,6 +45,7 @@ from railcv.syndra import (
     lateral_error,
     load_config,
     polygon_mask,
+    rail_masks,
     read_depth,
     read_labels,
     read_rgb,
@@ -75,8 +75,8 @@ def fnum(x, nd=2):
 
 def eval_frame(model, rgb_bgr, labels, cfg, cam, depth=None):
     ev = cfg["eval"]
-    gl, gr = gt_rails(class_mask(labels, cfg["labels"][cfg["ego_rails"]]), min_sep_px=ev["min_rail_sep_px"],
-                      center_x=cam.cx)
+    ego_mask, all_rails = rail_masks(labels, cfg)
+    gl, gr = gt_rails(ego_mask, min_sep_px=ev["min_rail_sep_px"], center_x=cam.cx, alt_mask=all_rails)
     # ego region from the labels when the taxonomy has "between the rails" classes, else the area between GT rails
     gt_region = ego_region_mask(labels, cfg) if region_from_labels(cfg) else polygon_mask(gl, gr, labels.shape)
     path = model(cv2.cvtColor(rgb_bgr, cv2.COLOR_BGR2RGB))
@@ -113,8 +113,8 @@ def eval_frame(model, rgb_bgr, labels, cfg, cam, depth=None):
         if y_lo is None or yc < y_lo or yc > labels.shape[0]:
             continue  # checkpoint beyond what either path covers
         r[key] = abs(float(rp.z_at_row(yc)) - zc)
-    if depth is not None and rg is not None and rg.fit is not None:
-        depth_metrics(r, depth, gl, gr, rg, rp, cfg)
+    if depth is not None and path.has_rails:
+        depth_metrics(r, depth, path, rp, cfg, cam)
     return r, path, (gl, gr), gt_region, rg, rp
 
 
@@ -123,37 +123,46 @@ def region_from_labels(cfg):
     return any(cfg["labels"].get(n) is not None for n in names)
 
 
-def depth_metrics(r, depth, gl, gr, rg, rp, cfg):
-    """Compare gauge ranging with the rendered depth map, sampled on the GT rails.
+def depth_metrics(r, depth, path, rp, cfg, cam):
+    """Range accuracy against the rendered depth map (planar depth, sampled on the predicted rails).
 
-    depth_units_per_m: raw depth units per metre of gauge-derived range (identifies the depth scale;
-    ~100 means centimetres). With depth.units_per_m set in the config, also:
-      gauge_vs_depth_pct   |gauge range from GT rails - depth| / depth, median  (tests the ranging principle)
-      range_err_depth_m/pct  |range from predicted rails - depth|, median over rows  (model + ranging)
+    This ground truth is independent of the labels and of the gauge assumption.
+      range_bias_pct          median signed error of the line-fit range, % of true range (+ = too far)
+      range_err_fit_pct/_m    median absolute error of the line-fit range
+      range_err_raw_pct       same for the per-row estimate Z = fx*G/dx
+      fit_err@Z / raw_err@Z   median absolute error (m) at anchors whose true range is within 15% of Z
+      height_depth_m          camera height above the rail plane implied by depth (truth for the self-check)
+      clear_true_m            true range of the far end of the predicted path
     """
+    upm = (cfg.get("depth") or {}).get("units_per_m")
+    if not upm or rp is None or rp.fit is None:
+        return
     h, w = depth.shape[:2]
-    y = np.clip(gl[:, 1].round().astype(int), 0, h - 1)
-    d = []
-    for rail in (gl, gr):
-        x = np.clip(rail[:, 0].round().astype(int), 0, w - 1)
-        d.append(depth[y, x].astype(np.float64))
-    d_raw = np.minimum(*d)  # the nearer of the two samples: guards against a miss onto the background
-    z_g = rg.z_at_row(gl[:, 1])
-    ok = (d_raw > 0) & (d_raw < 65535) & np.isfinite(z_g) & (z_g > 3) & (z_g < 80)
+    v = rp.valid
+    y = rp.y[v]
+    yi = np.clip(path.left[: len(rp.y), 1][v].round().astype(int), 0, h - 1)
+    xl = np.clip(path.left[: len(rp.y), 0][v].round().astype(int), 0, w - 1)
+    xr = np.clip(path.right[: len(rp.y), 0][v].round().astype(int), 0, w - 1)
+    z_true = np.minimum(depth[yi, xl], depth[yi, xr]).astype(np.float64) / float(upm)
+    z_fit, z_raw = rp.z_at_row(y), rp.z_raw[v]
+    ok = (z_true > 3) & (z_true < 200) & np.isfinite(z_fit) & np.isfinite(z_raw)
     if ok.sum() < 5:
         return
-    r["depth_units_per_m"] = float(np.median(d_raw[ok] / z_g[ok]))
-    upm = (cfg.get("depth") or {}).get("units_per_m")
-    if not upm:
-        return
-    z_d = d_raw / float(upm)
-    r["gauge_vs_depth_pct"] = float(np.median(np.abs(z_g[ok] - z_d[ok]) / z_d[ok]) * 100)
-    if rp is not None and rp.fit is not None:
-        z_p = rp.z_at_row(gl[:, 1])
-        m = ok & np.isfinite(z_p) & (gl[:, 1] >= rp.y[rp.valid].min())
-        if m.sum() >= 5:
-            r["range_err_depth_m"] = float(np.median(np.abs(z_p[m] - z_d[m])))
-            r["range_err_depth_pct"] = float(np.median(np.abs(z_p[m] - z_d[m]) / z_d[m]) * 100)
+    zt, zf, zr, yy = z_true[ok], z_fit[ok], z_raw[ok], y[ok]
+    r["range_bias_pct"] = float(np.median((zf - zt) / zt) * 100)
+    r["range_err_fit_pct"] = float(np.median(np.abs(zf - zt) / zt) * 100)
+    r["range_err_raw_pct"] = float(np.median(np.abs(zr - zt) / zt) * 100)
+    r["range_err_fit_m"] = float(np.median(np.abs(zf - zt)))
+    for zc in cfg["eval"]["range_checkpoints_m"]:
+        m = np.abs(zt - zc) <= 0.15 * zc
+        if m.any():
+            r[f"fit_err@{zc}"] = float(np.median(np.abs(zf[m] - zt[m])))
+            r[f"raw_err@{zc}"] = float(np.median(np.abs(zr[m] - zt[m])))
+    near = zt < 30
+    if near.sum() >= 5:
+        r["height_depth_m"] = float(np.median(zt[near] * (yy[near] - cam.cy) / cam.fy))
+    i = int(np.argmin(yy))
+    r["clear_true_m"] = float(zt[i])
 
 
 def draw(rgb_bgr, path, gt, gt_region, r, true_h=None):
@@ -165,10 +174,10 @@ def draw(rgb_bgr, path, gt, gt_region, r, true_h=None):
             cv2.polylines(vis, [rail.round().astype(np.int32)], False, RED, 1, cv2.LINE_AA)
     hud = [
         f"IoU {fnum(r['iou'])}   lateral err {fnum(r.get('lat_err_px'), 1)} px / {fnum(r.get('lat_err_m'), 3)} m",
-        f"Clear: pred {fnum(r['clear_pred_m'], 1)} m | GT {fnum(r['clear_gt_m'], 1)} m",
-        f"Cam height: pred {fnum(r['height_pred_m'])} | GT {fnum(r['height_gt_m'])}"
-        + (f" | true {true_h:.2f} m" if true_h else ""),
-        "green = TEP-Net, red = SynDRA ground truth",
+        f"Path end: est {fnum(r['clear_pred_m'], 1)} m | depth {fnum(r.get('clear_true_m'), 1)} m"
+        f"   range err {fnum(r.get('range_err_fit_pct'), 1)} %",
+        f"Cam height above rails: est {fnum(r['height_pred_m'])} m | depth {fnum(r.get('height_depth_m'))} m",
+        "green = TEP-Net, red = ground-truth rails",
     ]
     return draw_hud(vis, hud, warn=not path.has_rails)
 
@@ -177,7 +186,7 @@ def summarize(rows, keys):
     out = {"frames": len(rows), "detect_rate": np.mean([r["detected"] for r in rows]) if rows else float("nan")}
     for k in keys:
         v = np.array([r[k] for r in rows if r.get(k) is not None and math.isfinite(r[k])], float)
-        if k.startswith(("range_err", "lat_err", "clear", "depth", "gauge_vs")):
+        if k.startswith(("range_", "lat_err", "clear", "fit_err", "raw_err", "height")):
             out[k] = float(np.median(v)) if v.size else float("nan")
         else:
             out[k] = float(np.mean(v)) if v.size else float("nan")
@@ -205,7 +214,8 @@ def main():
 
     keys = ["iou", "lat_err_px", "lat_err_m", "clear_pred_m", "clear_gt_m", "height_pred_m", "height_gt_m",
             "implied_gauge_m", "infer_ms"] + [f"range_err@{z}" for z in cfg["eval"]["range_checkpoints_m"]] + [
-            "depth_units_per_m", "gauge_vs_depth_pct", "range_err_depth_m", "range_err_depth_pct"]
+            "range_bias_pct", "range_err_fit_pct", "range_err_raw_pct", "range_err_fit_m", "height_depth_m",
+            "clear_true_m"] + [f"{k}@{z}" for z in cfg["eval"]["range_checkpoints_m"] for k in ("fit_err", "raw_err")]
     fcsv = open(os.path.join(out, "frames.csv"), "w", newline="")
     fw = csv.DictWriter(fcsv, ["sequence", "frame", "detected", "gt_rows"] + keys)
     fw.writeheader()
@@ -265,12 +275,15 @@ def main():
           f"(config: {cam.gauge_m} m). Median range error at checkpoints: "
           + ", ".join(f"{z} m -> {fnum(table[-1][f'range_err@{z}'], 2)}" for z in cfg["eval"]["range_checkpoints_m"]))
     last = table[-1]
-    if math.isfinite(last.get("depth_units_per_m", float("nan"))):
-        print(f"Depth map: {fnum(last['depth_units_per_m'], 1)} raw units per metre of gauge range "
-              f"(about 100 = centimetres). Put it in the config as depth.units_per_m to get depth-based errors.")
-    if math.isfinite(last.get("gauge_vs_depth_pct", float("nan"))):
-        print(f"Gauge ranging vs depth (GT rails): {fnum(last['gauge_vs_depth_pct'], 2)} %   "
-              f"predicted rails vs depth: {fnum(last['range_err_depth_m'], 2)} m ({fnum(last['range_err_depth_pct'], 2)} %)")
+    if math.isfinite(last.get("range_err_fit_pct", float("nan"))):
+        zs = cfg["eval"]["range_checkpoints_m"]
+        print("\nAgainst the depth map (predicted rails, all sequences):")
+        print(f"  range bias {fnum(last['range_bias_pct'], 2)} %   |error| line fit {fnum(last['range_err_fit_pct'], 2)} % "
+              f"/ per row {fnum(last['range_err_raw_pct'], 2)} %")
+        print("  line fit error (m): " + ", ".join(f"{z} m -> {fnum(last[f'fit_err@{z}'], 2)}" for z in zs))
+        print("  per-row error (m):  " + ", ".join(f"{z} m -> {fnum(last[f'raw_err@{z}'], 2)}" for z in zs))
+        print(f"  camera height above rails: from predicted rails {fnum(last['height_pred_m'], 3)} m, "
+              f"from depth {fnum(last['height_depth_m'], 3)} m")
     print(f"Results: {out}")
 
 
