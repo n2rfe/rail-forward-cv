@@ -21,14 +21,16 @@ from railcv.ranging import estimate_range
 from railcv.syndra import (
     camera_model,
     class_mask,
+    depth_files,
     find_sequences,
     frame_pairs,
     gt_rails,
+    infer_size,
     iou,
     lateral_error,
     load_config,
     polygon_mask,
-    read_bin,
+    read_depth,
     read_labels,
     read_rgb,
 )
@@ -103,16 +105,74 @@ def test_polygon_iou():
     assert 0.5 < iou(a, b) < 1.0
 
 
-def test_read_bin_bgra_roundtrip(tmp_path):
+def test_read_raw_frames(tmp_path):
     img = np.random.default_rng(0).integers(0, 255, (F.H, F.W, 3), dtype=np.uint8)
     bgra = np.dstack([img, np.full((F.H, F.W), 255, np.uint8)])
     p = tmp_path / "x_000001.bin"
     bgra.tofile(p)
-    assert np.array_equal(read_bin(str(p)), img)
-    assert np.array_equal(read_rgb(str(p)), img)
+    assert np.array_equal(read_rgb(str(p)), img)  # W*H*4 BGRA
+    img.tofile(p)
+    assert np.array_equal(read_rgb(str(p)), img)  # W*H*3 BGR (SynDRA-Gen)
+    small = np.random.default_rng(1).integers(0, 255, (960, 1280, 3), dtype=np.uint8)
+    small.tofile(p)
+    assert read_rgb(str(p)).shape == (960, 1280, 3)  # size inferred from the file
+    ids = np.random.default_rng(2).integers(0, 40, (960, 1280), dtype=np.uint8)
+    ids.tofile(p)
+    assert np.array_equal(read_labels(str(p), small.shape), ids)  # one label byte per pixel
+    assert infer_size(1280 * 960 * 3) == (1280, 960, 3)
     (tmp_path / "bad.bin").write_bytes(b"123")
     with pytest.raises(ValueError):
-        read_bin(str(tmp_path / "bad.bin"))
+        read_rgb(str(tmp_path / "bad.bin"))
+
+
+def test_syndra_gen_layout_and_depth(tmp_path):
+    F.make_gen_tree(str(tmp_path))
+    seqs = find_sequences(str(tmp_path))
+    assert len(seqs) == 1 and seqs[0].generated and seqs[0].name == "2026-11-15_15-00-00"
+    pairs = frame_pairs(seqs[0])
+    assert [p[0] for p in pairs] == [0, 1, 2] and pairs[0][1].endswith("frame_000000.bin")
+    rgb = read_rgb(pairs[0][1])
+    lab = read_labels(pairs[0][2], rgb.shape)
+    assert rgb.shape == (F.H, F.W, 3) and lab.shape == (F.H, F.W)
+    # ego and neighbor rails share id 7: the pair around the camera axis must be picked
+    gl, gr = gt_rails(class_mask(lab, 7), center_x=F.CX)
+    tl, tr, _ = F.true_rails()
+    _, el, er = lateral_error(tl, tr, gl, gr)
+    assert len(gl) > 200 and np.median(np.concatenate([el, er])) < 1.0
+    depth = read_depth(depth_files(seqs[0])[0], rgb.shape)
+    y20 = round(F.CY + F.FX * F.CAM_H / 20.0)
+    assert depth[y20, 960] / F.DEPTH_UNITS_PER_M == pytest.approx(20.0, rel=0.01)
+
+
+def test_eval_on_syndra_gen_output(tmp_path):
+    F.make_gen_tree(str(tmp_path / "gen"))
+    cfg = load_config(os.path.join(ROOT, "configs", "syndra.yaml"))
+    cfg["labels"]["railraised-main"] = 7  # only the rail class is known; no "between the rails" classes
+    cfg_path = tmp_path / "syndra.yaml"
+    with open(cfg_path, "w") as f:
+        yaml.safe_dump(cfg, f)
+    mdir = tmp_path / "rand-model"
+    mdir.mkdir()
+    mcfg = {"method": "regression", "backbone": "resnet18", "input_shape": [3, 512, 512], "anchors": 64,
+            "pool_channels": 8, "fc_hidden_size": 2048, "crop_margin_sides": 0.1, "crop_margin_top": 0.1}
+    with open(mdir / "config.yaml", "w") as f:
+        yaml.safe_dump(mcfg, f)
+    torch.manual_seed(0)
+    torch.save(build_model(mcfg).state_dict(), mdir / "best.pt")
+    out = tmp_path / "run"
+    res = subprocess.run(
+        [sys.executable, os.path.join(ROOT, "scripts", "syndra_eval.py"), "--root", str(tmp_path / "gen"),
+         "--config", str(cfg_path), "--model", str(mdir), "--device", "cpu", "--stride", "1", "--vis", "1",
+         "--out", str(out)],
+        capture_output=True, text=True, cwd=ROOT, check=False,
+    )
+    assert res.returncode == 0, res.stderr
+    import csv
+
+    with open(out / "summary.csv") as f:
+        row = next(r for r in csv.DictReader(f) if r["sequence"] == "ALL")
+    assert float(row["height_gt_m"]) == pytest.approx(3.5, rel=0.03)
+    assert "range_err_fit_pct" in row and "fit_err@20" in row  # depth columns exist (random model: may be empty)
 
 
 def test_image_folder_source(tree):
@@ -159,3 +219,39 @@ def test_eval_end_to_end_random_model(tree, tmp_path):
         row = next(r for r in csv.DictReader(f) if r["sequence"] == "ALL")
     assert float(row["height_gt_m"]) == pytest.approx(3.5, rel=0.03)
     assert float(row["implied_gauge_m"]) == pytest.approx(F.GAUGE, rel=0.03)
+
+
+def test_depth_metrics_with_true_rails(tmp_path):
+    """Feeding the true rails as the 'prediction' must give ~zero range error against the depth map."""
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("syndra_eval", os.path.join(ROOT, "scripts", "syndra_eval.py"))
+    ev = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(ev)
+    from railcv.egopath import EgoPath
+
+    seq = F.make_gen_tree(str(tmp_path))
+    s = find_sequences(str(tmp_path))[0]
+    rgb = read_rgb(frame_pairs(s)[0][1])
+    depth = read_depth(depth_files(s)[0], rgb.shape)
+    cfg = load_config(os.path.join(ROOT, "configs", "syndra.yaml"))
+    cam = camera_model(cfg, rgb.shape)
+    tl, tr, _ = F.true_rails(z_min=6, z_max=60)
+    path = EgoPath(left=tl, right=tr)
+    r = {}
+    ev.depth_metrics(r, depth, path, estimate_range(tl, tr, cam), cfg, cam)
+    assert abs(r["range_bias_pct"]) < 1.0 and r["range_err_fit_pct"] < 1.0
+    assert r["height_depth_m"] == pytest.approx(F.CAM_H, rel=0.02)
+    assert r["fit_err@20"] < 0.3 and seq
+
+
+def test_gt_rails_bridge_gaps_and_overdrawn_rails():
+    _, lab = F.render()
+    ego = class_mask(lab, list(F.COLORS["railraised-main"]))
+    full, _ = gt_rails(ego)
+    broken = ego.copy()
+    broken[600:660] = False  # the ego-rail label drops out for 60 rows
+    gl, _ = gt_rails(broken)
+    assert gl[:, 1].min() <= full[:, 1].min() + 2  # the trace continues past the gap
+    gl2, _ = gt_rails(broken, alt_mask=ego)  # another class holds the rails there
+    assert len(gl2) > len(gl)

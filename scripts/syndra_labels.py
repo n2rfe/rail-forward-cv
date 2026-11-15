@@ -4,7 +4,8 @@ SynDRA doesn't publish its label colors, so this samples a few label frames from
 lists every value with its pixel share, and saves a contact sheet showing where each value is.
 It also suggests which value is the ego rails (railraised-main): thin, paired, bottom-center.
 
-  python scripts/syndra_labels.py --seq data/syndra/Scenario_0/HV/Sunny/Morning
+  python scripts/syndra_labels.py --seq data/syndra/Scenario_0/HV/Sunny/Morning          (SynDRA dataset)
+  python scripts/syndra_labels.py --seq "C:/.../SynDRA-Gen/DataAcquired/<timestamp>"     (SynDRA-Gen output)
   -> output/syndra/labels/contact_sheet.jpg  (+ a YAML snippet printed to the terminal)
 """
 
@@ -47,8 +48,8 @@ def main():
     pick = [pairs[i] for i in np.linspace(0, len(pairs) - 1, min(a.frames, len(pairs))).astype(int)]
     print(f"Sequence {seq.name}: {len(pairs)} frames, sampling {len(pick)}")
 
-    labs = [read_labels(s) for _, _, s in pick]
     rgbs = [read_rgb(r) for _, r, _ in pick]
+    labs = [read_labels(s, rgbs[0].shape) for _, _, s in pick]
     h, w = labs[0].shape[:2]
     color = labs[0].ndim == 3
     print(f"Label images: {w}x{h}, {'RGB color' if color else 'single-channel'}")
@@ -64,7 +65,7 @@ def main():
         inv = inv.reshape(h, w)
         for i, (v, c) in enumerate(zip(vals, counts)):
             k = as_key(v)
-            s = stats.setdefault(k, {"px": 0, "zone": 0, "runw": [], "pairs": 0, "rows": 0})
+            s = stats.setdefault(k, {"px": 0, "zone": 0, "runw": [], "pairs": 0, "multi": 0, "rows": 0})
             m = inv == i
             s["px"] += int(c)
             s["zone"] += int((m & zone).sum())
@@ -74,16 +75,18 @@ def main():
                     s["rows"] += 1
                     s["runw"].extend(cw.tolist())
                     s["pairs"] += int(len(cx) == 2)
+                    s["multi"] += int(len(cx) >= 2)
 
     total = h * w * len(labs)
     ztotal = zone.sum() * len(labs)
     ranked = sorted(stats.items(), key=lambda kv: -kv[1]["px"])[: a.top]
 
     def rail_score(s):
-        if s["rows"] < 3 or not s["runw"]:
+        # rails: thin runs, at least two per row near the bottom, present in the ego zone
+        if s["rows"] < 3 or not s["runw"] or not s["zone"]:
             return 0.0
         thin = 1.0 / (1.0 + np.median(s["runw"]) / 15.0)
-        return (s["zone"] / ztotal) * (s["pairs"] / s["rows"]) * thin
+        return thin * (s["multi"] / s["rows"])
 
     rail_guess = max(stats.items(), key=lambda kv: rail_score(kv[1]))[0]
 
@@ -118,8 +121,8 @@ def main():
     print(f"\nContact sheet: {out}")
     print("Find the ego-track classes in the sheet, then paste into configs/syndra.yaml -> labels:")
     print(f"  railraised-main: {fmt(rail_guess)}   # suggested: verify in the contact sheet")
-    print("  ballast-int-main: ...   # between the ego rails")
-    print("  sleeper-int-main: ...   # sleepers between the ego rails (may share a value with ballast)")
+    print("  ballast-int-main: ...   # between the ego rails, if the label set has such a class (else leave null)")
+    print("  sleeper-int-main: ...   # sleepers between the ego rails, if present (else leave null)")
 
 
 if __name__ == "__main__":

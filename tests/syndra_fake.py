@@ -75,3 +75,33 @@ def make_tree(root, n_frames=3, label_ext=".png"):
             out = os.path.join(d, f"Sce0_sun_mor_{k:06d}{label_ext}")
             cv2.imwrite(out, img if cam.startswith("RGB") else lab[..., ::-1])
     return seq
+
+
+IDS = {"background": 0, "railraised-main": 7, "ballast-int-main": 12, "sleeper-int-main": 13, "railraised-other": 7}
+DEPTH_UNITS_PER_M = 100.0  # fake depth in centimetres
+
+
+def make_gen_tree(root, n_frames=3, depth=True, split_rails=False):
+    """SynDRA-Gen layout: root/DataAcquired/<timestamp>/{RGBCamera,SSCamera,DepthCamera}/Bin_folder/frame_00000k.bin
+
+    Labels are one id byte per pixel. By default the ego and neighboring rails share one id, as in a
+    label set without a separate ego-rail class."""
+    seq = os.path.join(root, "DataAcquired", "2026-11-15_15-00-00")
+    img, lab = render()
+    ids = np.zeros((H, W), np.uint8)
+    for name, color in COLORS.items():
+        v = IDS[name] if not (split_rails and name == "railraised-other") else 8
+        ids[np.all(lab == np.array(color, np.uint8), axis=-1)] = v
+    yy = np.arange(H, dtype=np.float64)[:, None] * np.ones((1, W))
+    z = np.where(yy > CY + 1, FX * CAM_H / np.maximum(yy - CY, 1e-6), 655.0)  # planar depth of the rail plane
+    d16 = np.clip(z * DEPTH_UNITS_PER_M, 0, 65535).astype(np.uint16)
+    dbytes = np.dstack([(d16 >> 8).astype(np.uint8), (d16 & 255).astype(np.uint8)])
+    for cam, data in (("RGBCamera", img), ("SSCamera", ids), ("DepthCamera", dbytes if depth else None)):
+        if data is None:
+            continue
+        d = os.path.join(seq, cam, "Bin_folder")
+        os.makedirs(d, exist_ok=True)
+        os.makedirs(os.path.join(seq, cam, "Poses"), exist_ok=True)
+        for k in range(n_frames):
+            data.tofile(os.path.join(d, f"frame_{k:06d}.bin"))
+    return seq
